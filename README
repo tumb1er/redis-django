@@ -1,1 +1,3 @@
-This file was created by PyCharm 2.5 for binding GitHub repository
+== Redis-Django ==
+Django-compatible model layer and database backend for [http://redis.io Redis]
+
