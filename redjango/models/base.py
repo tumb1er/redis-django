@@ -312,7 +312,6 @@ class Model(object):
     # Class Methods #
     #################
 
-    @classmethod
     @classproperty
     def attributes(cls):
         """Return the attributes of the model.
@@ -322,7 +321,6 @@ class Model(object):
         """
         return dict(cls._attributes)
 
-    @classmethod
     @classproperty
     def lists(cls):
         """Returns the lists of the model.
@@ -332,19 +330,16 @@ class Model(object):
         """
         return dict(cls._lists)
 
-    @classmethod
     @classproperty
     def indices(cls):
         """Return a list of the indices of the model."""
         return cls._indices
 
-    @classmethod
     @classproperty
     def references(cls):
         """Returns the mapping of reference fields of the model."""
         return cls._references
 
-    @classmethod
     @classproperty
     def counters(cls):
         """Returns the mapping of the counters."""
