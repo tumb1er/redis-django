@@ -9,7 +9,7 @@ from redjango.containers import List
 from exceptions import FieldValidationError
 
 __all__ = ['Attribute', 'CharField', 'ListField', 'DateTimeField',
-        'DateField', 'ReferenceField', 'IntegerField',
+        'DateField', 'ForeignKey', 'IntegerField',
         'FloatField', 'BooleanField', 'Counter', 'ZINDEXABLE']
 
 
@@ -324,7 +324,7 @@ class ListField(object):
             raise FieldValidationError(errors)
 
 
-class ReferenceField(object):
+class ForeignKey(object):
     def __init__(self,
                  target_type,
                  name=None,

@@ -116,7 +116,7 @@ class AttributesTest(TestCase):
             bool_f=True,
             char_f='char',
             date_f=datetime.date.today(),
-            dt_f=datetime.datetime.now(),
+            dt_f=datetime.datetime.now().replace(microsecond=125000),
             float_f=3.1415)
         for fn in ('attr', 'int_f', 'bool_f', 'char_f', 'date_f', 'dt_f',
                       'float_f'):

@@ -60,7 +60,7 @@ def _initialize_references(model_class, name, bases, attrs):
     h = {}
     deferred = []
     for k, v in attrs.iteritems():
-        if isinstance(v, ReferenceField):
+        if isinstance(v, ForeignKey):
             model_class._references[k] = v
             v.name = v.name or k
             att = Attribute(name=v.attname)
