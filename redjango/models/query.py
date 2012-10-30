@@ -1,6 +1,8 @@
 """
 Handles the queries.
 """
+from traceback import print_stack
+from django.db import connections, router
 import redjango
 from redjango.containers import SortedSet, Set, List
 from exceptions import AttributeNotIndexed
@@ -62,6 +64,7 @@ class QuerySet(Set):
     def get_by_id(self, id):
         if self.model_class.exists(id):
             return self._get_item_with_id(id)
+        raise self.model_class.DoesNotExist
 
     def first(self):
         try:
@@ -89,9 +92,11 @@ class QuerySet(Set):
         return clone
 
     def zfilter(self, **kwargs):
+        print_stack()
         clone = self._clone()
         if not clone._zfilters:
             clone._zfilters = []
+        print kwargs
         clone._zfilters.append(kwargs)
         return clone
 
@@ -174,7 +179,7 @@ class QuerySet(Set):
             index = self._build_key_from_filter_item(k, v)
             if k not in self.model_class._indices:
                 raise AttributeNotIndexed(
-                        "Attribute %s is not indexed in %s class." %
+                        "Field %s is not indexed in %s class." %
                         (k, self.model_class.__name__))
             indices.append(index)
         new_set_key = "~%s.%s" % ("+".join([self.key] + indices), id(self))
@@ -188,7 +193,7 @@ class QuerySet(Set):
             index = self._build_key_from_filter_item(k, v)
             if k not in self.model_class._indices:
                 raise AttributeNotIndexed(
-                        "Attribute %s is not indexed in %s class." %
+                        "Field %s is not indexed in %s class." %
                         (k, self.model_class.__name__))
             indices.append(index)
         new_set_key = "~%s.%s" % ("-".join([self.key] + indices), id(self))
@@ -278,6 +283,12 @@ class QuerySet(Set):
     def _get_item_with_id(self, id):
         instance = self.model_class()
         instance._id = str(id)
+        using = router.db_for_read(self.model_class)
+        connection = connections[using]
+        keys = self.model_class._attributes.keys()
+        values = connection.hmget(self.model_class._key[id], keys)
+        for i in range(len(keys)):
+            setattr(instance, keys[i], values[i])
         return instance
 
     def _build_key_from_filter_item(self, index, value):

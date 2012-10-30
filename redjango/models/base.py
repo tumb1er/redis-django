@@ -1,15 +1,18 @@
+from itertools import izip
+import sys
 import time
 from datetime import datetime, date
 from django.core import exceptions
+from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
+from django.db import router, connections
+from django.db.models.base import ModelState
 from redjango.containers import Set, List
 from fields import *
 from key import Key
-from managers import ManagerDescriptor, Manager
+from manager import ManagerDescriptor, Manager
 from utils import _encode_key, classproperty
 from exceptions import FieldValidationError, MissingID, BadKeyError
-from django.db import router, connections
-
-from django.db.models.base import ModelState
+from redjango.models.options import Options
 
 
 __all__ = ['Model', 'from_key']
@@ -24,7 +27,7 @@ def _initialize_attributes(model_class, name, bases, attrs):
     """Initialize the attributes of the model."""
     model_class._attributes = {}
     for k, v in attrs.iteritems():
-        if isinstance(v, Attribute):
+        if isinstance(v, Field):
             model_class._attributes[k] = v
             v.name = v.name or k
 
@@ -63,7 +66,7 @@ def _initialize_references(model_class, name, bases, attrs):
         if isinstance(v, ForeignKey):
             model_class._references[k] = v
             v.name = v.name or k
-            att = Attribute(name=v.attname)
+            att = Field(name=v.attname)
             h[v.attname] = att
             setattr(model_class, v.attname, att)
             refd = _initialize_referenced(model_class, v)
@@ -76,7 +79,7 @@ def _initialize_indices(model_class, name, bases, attrs):
     """Stores the list of indexed attributes."""
     model_class._indices = []
     for k, v in attrs.iteritems():
-        if isinstance(v, (Attribute, ListField)) and v.indexed:
+        if isinstance(v, (Field, ListField)) and v.db_index:
             model_class._indices.append(k)
     if model_class._meta['indices']:
         model_class._indices.extend(model_class._meta['indices'])
@@ -97,31 +100,8 @@ def _initialize_manager(model_class):
     """Initializes the objects manager attribute of the model."""
     model_class.objects = ManagerDescriptor(Manager(model_class))
 
-
-class ModelOptions(object):
-    """Handles options defined in Meta class of the model.
-
-    Example:
-
-        class Person(models.Model):
-            name = models.Attribute()
-
-            class Meta:
-                indices = ('full_name',)
-                db = redis.Redis(host='localhost', port=29909)
-
-    """
-    def __init__(self, meta):
-        self.meta = meta
-
-    def get_field(self, field_name):
-        if self.meta is None:
-            return None
-        try:
-            return self.meta.__dict__[field_name]
-        except KeyError:
-            return None
-    __getitem__ = get_field
+def subclass_exception(name, parents, module):
+    return type(name, parents, {'__module__': module})
 
 
 _deferred_refs = []
@@ -129,13 +109,84 @@ _deferred_refs = []
 class ModelBase(type):
     """Metaclass of the Model."""
 
-    def __init__(cls, name, bases, attrs):
-        super(ModelBase, cls).__init__(name, bases, attrs)
+    def __new__(cls, name, bases, attrs):
+        super_new = super(ModelBase, cls).__new__
+        parents = [b for b in bases if isinstance(b, ModelBase)]
+        if not parents:
+            # If this isn't a subclass of Model, don't do anything special.
+            return super_new(cls, name, bases, attrs)
+
+        # Create the class.
+        module = attrs.pop('__module__')
+        new_class = super_new(cls, name, bases, {'__module__': module})
+        attr_meta = attrs.pop('Meta', None)
+        abstract = getattr(attr_meta, 'abstract', False)
+        if not attr_meta:
+            meta = getattr(new_class, 'Meta', None)
+        else:
+            meta = attr_meta
+        base_meta = getattr(new_class, '_meta', None)
+
+        if getattr(meta, 'app_label', None) is None:
+            # Figure out the app_label by looking one level up.
+            # For 'django.contrib.sites.models', this would be 'sites'.
+            model_module = sys.modules[new_class.__module__]
+            kwargs = {"app_label": model_module.__name__.split('.')[-2]}
+        else:
+            kwargs = {}
+
+        new_class.add_to_class('_meta', Options(meta, **kwargs))
+
         global _deferred_refs
-        cls._meta = ModelOptions(attrs.pop('Meta', None))
-        cls._meta.local_fields = {}
+        deferred = _initialize_references(new_class, name, bases, attrs)
+        _deferred_refs.extend(deferred)
+        _initialize_attributes(new_class, name, bases, attrs)
+        _initialize_counters(new_class, name, bases, attrs)
+        _initialize_lists(new_class, name, bases, attrs)
+        _initialize_indices(new_class, name, bases, attrs)
+        _initialize_key(new_class, name)
+        _initialize_manager(new_class)
+        # if targeted by a reference field using a string,
+        # override for next try
+        for target, model_class, att in _deferred_refs:
+            if name == target:
+                att._target_type = new_class
+                _initialize_referenced(model_class, att)
+
+        if not abstract:
+            new_class.add_to_class('DoesNotExist', subclass_exception('DoesNotExist',
+                tuple(x.DoesNotExist
+                    for x in parents if hasattr(x, '_meta') and not x._meta.abstract)
+                or (ObjectDoesNotExist,), module))
+            new_class.add_to_class('MultipleObjectsReturned', subclass_exception('MultipleObjectsReturned',
+                tuple(x.MultipleObjectsReturned
+                    for x in parents if hasattr(x, '_meta') and not x._meta.abstract)
+                or (MultipleObjectsReturned,), module))
+            if base_meta and not base_meta.abstract:
+                # Non-abstract child classes inherit some attributes from their
+                # non-abstract parent (unless an ABC comes before it in the
+                # method resolution order).
+                if not hasattr(meta, 'ordering'):
+                    new_class._meta.ordering = base_meta.ordering
+                if not hasattr(meta, 'get_latest_by'):
+                    new_class._meta.get_latest_by = base_meta.get_latest_by
+
+        # Add all attributes to the class.
+        for obj_name, obj in attrs.items():
+            new_class.add_to_class(obj_name, obj)
+
+        return new_class
+
+
+    def AAAA(cls, name, bases, attrs):
+        parents = [b for b in bases if isinstance(b, ModelBase)]
+        module = attrs.pop('__module__')
+        super(ModelBase, cls).__init__(name, bases, attrs)
+        cls.add_to_class('_meta', Options(attrs.pop('Meta', None)))
+        cls._meta.local_fields = []
         for fname, field in attrs.iteritems():
-            cls._meta.local_fields[fname] = field
+            cls.add_to_class(fname, field)
+        global _deferred_refs
         deferred = _initialize_references(cls, name, bases, attrs)
         _deferred_refs.extend(deferred)
         _initialize_attributes(cls, name, bases, attrs)
@@ -150,6 +201,16 @@ class ModelBase(type):
             if name == target:
                 att._target_type = cls
                 _initialize_referenced(model_class, att)
+
+        cls.add_to_class('DoesNotExist', subclass_exception('DoesNotExist',
+            tuple(x.DoesNotExist
+                for x in parents if hasattr(x, '_meta') and not x._meta.abstract)
+            or (ObjectDoesNotExist,), module))
+        print cls.DoesNotExist
+        cls.add_to_class('MultipleObjectsReturned', subclass_exception('MultipleObjectsReturned',
+            tuple(x.MultipleObjectsReturned
+                for x in parents if hasattr(x, '_meta') and not x._meta.abstract)
+            or (MultipleObjectsReturned,), module))
 
     def add_to_class(cls, name, value):
         if hasattr(value, 'contribute_to_class'):
@@ -167,11 +228,14 @@ class Model(object):
     _counters = None
     _key = None
     objects = None
+    _deferred = False
+
     class DoesNotExist(exceptions.ObjectDoesNotExist):
         pass
 
-    def __init__(self, **kwargs):
-        self.update_attributes(**kwargs)
+    def __init__(self, *args, **kwargs):
+        self.update_attributes(*args, **kwargs)
+
         self._state = ModelState()
 
     def is_valid(self):
@@ -197,7 +261,7 @@ class Model(object):
         Example:
 
             class Person(Model):
-                name = Attribute(required=True)
+                name = Field(required=True)
 
                 def validate(self):
                     if name == 'Nemo':
@@ -206,15 +270,33 @@ class Model(object):
         """
         pass
 
-    def update_attributes(self, **kwargs):
+    def update_attributes(self, *args, **kwargs):
         """Updates the attributes of the model."""
         attrs = self.attributes.values() + self.lists.values() \
                 + self.references.values()
-        for att in attrs:
-            if att.name in kwargs:
-                att.__set__(self, kwargs[att.name])
+        fields_iter = iter(self._meta.fields)
+        # Handling *args
+        for val, field in izip(args, fields_iter):
+            field.__set__(self, val)
+            kwargs.pop(field.name, None)
+        # Handling defaults
+        for field in fields_iter:
+            if kwargs:
+                try:
+                    val = kwargs.pop(field.attname)
+                except KeyError:
+                    # This is done with an exception rather than the
+                    # default argument on pop because we don't want
+                    # get_default() to be evaluated, and then not used.
+                    # Refs #12057.
+                    val = field.get_default()
+            else:
+                val = field.get_default()
+            field.__set__(self, val)
 
-    def save(self):
+        print self.__dict__
+
+    def save(self, force_insert=False, force_update=False, using=None):
         """Saves the instance to the datastore."""
         if not self.is_valid():
             raise exceptions.ValidationError(self._errors)
@@ -234,7 +316,9 @@ class Model(object):
 
     def delete(self):
         """Deletes the object from the datastore."""
-        pipeline = self.db.pipeline()
+        connection = router.db_for_write(self.__class__, instance=self)
+        db = connections[connection]
+        pipeline = db.pipeline()
         self._delete_from_indices(pipeline)
         self._delete_membership(pipeline)
         pipeline.delete(self.key())
@@ -251,7 +335,9 @@ class Model(object):
         """Increments a counter."""
         if att not in self.counters:
             raise ValueError("%s is not a counter.")
-        self.db.hincrby(self.key(), att, val)
+        connection = router.db_for_write(self.__class__, instance=self)
+        db = connections[connection]
+        db.hincrby(self.key(), att, val)
 
     def decr(self, att, val=1):
         """Decrements a counter."""
@@ -359,9 +445,12 @@ class Model(object):
 
     def _initialize_id(self):
         """Initializes the id of the instance."""
-        using = router.db_for_write(self.__class__, instance=self)
-        connection = connections[using]
-        self.id = str(connection.incr(self._key['id']))
+        if not self._meta.pk:
+            using = router.db_for_write(self.__class__, instance=self)
+            connection = connections[using]
+            self.id = str(connection.incr(self._key['id']))
+        else:
+            self.id = getattr(self, self._meta.pk.name)
 
     def _write(self, _new=False):
         """Writes the values of the attributes to the datastore.
@@ -622,3 +711,4 @@ class Mutex(object):
     @property
     def lock_timeout(self):
         return "%f" % (time.time() + 1.0)
+

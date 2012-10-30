@@ -5,6 +5,7 @@ from redis.exceptions import *
 import sys
 from django.db import utils
 from redis.client import list_or_args
+from client import DatabaseClient as RedisDatabaseClient
 
 try:
     from redis import Redis
@@ -68,6 +69,12 @@ class RedisDatabaseCreation(BaseDatabaseCreation):
         self.connection.flushdb()
 
 
+class RedisDatabaseOperations(DatabaseOperations):
+    def quote_name(self, name):
+        if name.startswith("`") and name.endswith("`"):
+            return name # Quoting once is enough.
+        return "`%s`" % name
+
 
 class DatabaseWrapper(BaseDatabaseWrapper):
     operators = {}
@@ -92,8 +99,8 @@ class DatabaseWrapper(BaseDatabaseWrapper):
         super(DatabaseWrapper, self).__init__(*args, **kwargs)
 
         self.features = BaseDatabaseFeatures(self)
-        self.ops = DatabaseOperations()
-        self.client = DatabaseClient(self)
+        self.ops = RedisDatabaseOperations()
+        self.client = RedisDatabaseClient(self)
         self.creation = RedisDatabaseCreation(self)
         self.introspection = DatabaseIntrospection(self)
         self.validation = BaseDatabaseValidation(self)

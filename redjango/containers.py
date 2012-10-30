@@ -462,11 +462,17 @@ class SortedSet(Container):
 
     @property
     def _min_score(self):
-        return self.zscore(self.__getitem__(0))
+        try:
+            return self.zscore(self.__getitem__(0))
+        except:
+            return '-inf'
 
     @property
     def _max_score(self):
-        return self.zscore(self.__getitem__(-1))
+        try:
+            return self.zscore(self.__getitem__(-1))
+        except IndexError:
+            return '+inf'
 
     def lt(self, v, limit=None, offset=None):
         """Returns the list of the members of the set that have scores

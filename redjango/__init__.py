@@ -2,6 +2,6 @@
 
 # $Id: $
 from django.db import connections
-from django.conf import settings
+import settings
 connection = connections[settings.REDJANGO_DEFAULT_DATABASE]
 

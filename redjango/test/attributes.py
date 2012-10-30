@@ -9,11 +9,11 @@ class AttributesTest(TestCase):
 
     def setUp(self):
         from django.contrib.sites.models import Site
-        from redjango.models.fields import Attribute
+        from redjango.models.fields import Field
 
         self.default_redis = redjango.settings.REDJANGO_DEFAULT_DATABASE
         self.DatabaseWrapper = redjango.backend.base.DatabaseWrapper
-        self.a1 = Attribute(name='n',
+        self.a1 = Field(name='n',
             indexed=False,
             required=True,
             validator=lambda v: True,
@@ -31,13 +31,13 @@ class AttributesTest(TestCase):
 
     def test_attribute_descriptor_protocol(self):
         """Проверяет работу дескриптора атриботов модели"""
-        from redjango.models.fields import Attribute
+        from redjango.models.fields import Field
         from redjango.models import Model
 
         self.conn.cursor().flushdb()
 
         class MyModel(Model):
-            attr = Attribute()
+            attr = Field()
 
         mm = MyModel()
         mm.attr = 'value'
@@ -50,13 +50,13 @@ class AttributesTest(TestCase):
 
     def test_attribute_default_value_getter(self):
         """Проверяет, что у модели есть значение атрибута по умолчанию"""
-        from redjango.models.fields import Attribute
+        from redjango.models.fields import Field
         from redjango.models import Model
 
         self.conn.cursor().flushdb()
 
         class MyModel(Model):
-            attr = Attribute(default=2)
+            attr = Field(default=2)
 
         mm = MyModel()
         self.assertEqual(mm.attr, 2)
@@ -102,7 +102,7 @@ class AttributesTest(TestCase):
             pass
 
         class MyModel(Model):
-            attr = fields.Attribute()
+            attr = fields.Field()
             int_f = fields.IntegerField()
             bool_f = fields.BooleanField()
             char_f = fields.CharField()

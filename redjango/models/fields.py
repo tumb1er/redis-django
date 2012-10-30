@@ -5,15 +5,18 @@ Defines the fields that can be added to redjango models.
 import time
 from datetime import datetime, date
 from django.db import router, connections
+from django.db.models.fields import Field
 from redjango.containers import List
+from redjango.compat import bind_method
 from exceptions import FieldValidationError
 
-__all__ = ['Attribute', 'CharField', 'ListField', 'DateTimeField',
-        'DateField', 'ForeignKey', 'IntegerField',
+__all__ = ['Field', 'CharField', 'TextField', 'ListField', 'DateTimeField',
+        'DateField', 'ForeignKey', 'IntegerField', 'PositiveSmallIntegerField',
         'FloatField', 'BooleanField', 'Counter', 'ZINDEXABLE']
 
 
-class Attribute(object):
+
+class Field(object):
     """Defines an attribute of the model.
 
     The attribute accepts strings and are stored in Redis as
@@ -32,18 +35,35 @@ class Attribute(object):
 
     """
     def __init__(self,
+                 verbose_name=None,
                  name=None,
-                 indexed=True,
+                 db_index=True,
                  required=False,
                  validator=None,
                  unique=False,
-                 default=None):
+                 default=None,
+                 help_text='',
+                 editable=True,
+                 blank=False,
+                 null=False,
+                 choices=None,
+                 primary_key=False,
+                 **kwargs
+                 ):
+        self.verbose_name = verbose_name
         self.name = name
-        self.indexed = indexed
+        self.db_index = db_index
         self.required = required
         self.validator = validator
         self.default = default
         self.unique = unique
+        self.help_text = help_text
+        self.editable = editable
+        self.null = null
+        self.blank = blank
+        self._choices = choices or []
+        self.primary_key = primary_key
+        self.rel = None
 
     def __get__(self, instance, owner):
         if instance is None:
@@ -67,7 +87,7 @@ class Attribute(object):
 
 
     def __set__(self, instance, value):
-        setattr(instance, '_' + self.name, value)
+        setattr(instance, self.name, value)
 
     def typecast_for_read(self, value):
         """Typecasts the value for reading from Redis."""
@@ -112,16 +132,35 @@ class Attribute(object):
 
     def validate_uniqueness(self, instance, val):
         encoded = self.typecast_for_storage(val)
-        same = len(instance.__class__.objects.filter(**{self.name: encoded}))
-        if same > 0:
-            return self.name, 'not unique'
+        same = instance.__class__.objects.filter(**{self.name: encoded})
+        if len(same) > 0:
+            if same[0] != instance:
+                return self.name, 'not unique'
+
+    def set_attributes_from_name(self, name):
+        self.name = name
+
+    @property
+    def attname(self):
+        return self.name
 
 
-class CharField(Attribute):
+    #
+    # derived methods from django.db.models.Field
+    #
+    formfield = bind_method(Field.formfield)
+    has_default = bind_method(Field.has_default)
+    get_default = bind_method(Field.get_default)
+    _get_choices = bind_method(Field._get_choices)
+    choices = property(_get_choices)
+    get_choices = bind_method(Field.get_choices)
+    contribute_to_class = bind_method(Field.contribute_to_class)
 
-    def __init__(self, max_length=255, **kwargs):
-        super(CharField, self).__init__(**kwargs)
-        self.max_length = max_length
+class CharField(Field):
+
+    def __init__(self, *args, **kwargs):
+        super(CharField, self).__init__(*args, **kwargs)
+        self.max_length = kwargs.get('max_length', 255)
 
     def validate(self, instance):
         errors = []
@@ -139,7 +178,12 @@ class CharField(Attribute):
             raise FieldValidationError(errors)
 
 
-class BooleanField(Attribute):
+class TextField(CharField):
+    pass
+
+
+
+class BooleanField(Field):
     def typecast_for_read(self, value):
         return bool(int(value))
 
@@ -155,7 +199,7 @@ class BooleanField(Attribute):
         return self.value_type()
 
 
-class IntegerField(Attribute):
+class IntegerField(Field):
     def typecast_for_read(self, value):
         return int(value)
 
@@ -170,8 +214,11 @@ class IntegerField(Attribute):
     def acceptable_types(self):
         return int, long
 
+class PositiveSmallIntegerField(IntegerField):
+    pass
 
-class FloatField(Attribute):
+
+class FloatField(Field):
     def typecast_for_read(self, value):
         return float(value)
 
@@ -187,10 +234,12 @@ class FloatField(Attribute):
         return self.value_type()
 
 
-class DateTimeField(Attribute):
+class DateTimeField(Field):
 
-    def __init__(self, auto_now=False, auto_now_add=False, **kwargs):
-        super(DateTimeField, self).__init__(**kwargs)
+    def __init__(self, verbose_name=None, name=None, auto_now=False,
+                 auto_now_add=False, **kwargs):
+        super(DateTimeField, self).__init__(verbose_name=verbose_name,
+            name=name, **kwargs)
         self.auto_now = auto_now
         self.auto_now_add = auto_now_add
 
@@ -214,7 +263,7 @@ class DateTimeField(Attribute):
     def acceptable_types(self):
         return self.value_type()
 
-class DateField(Attribute):
+class DateField(Field):
 
     def __init__(self, auto_now=False, auto_now_add=False, **kwargs):
         super(DateField, self).__init__(**kwargs)
@@ -255,13 +304,13 @@ class ListField(object):
     """
     def __init__(self, target_type,
                  name=None,
-                 indexed=True,
+                 db_index=True,
                  required=False,
                  validator=None,
                  default=None):
         self._target_type = target_type
         self.name = name
-        self.indexed = indexed
+        self.db_index = db_index
         self.required = required
         self.validator = validator
         self.default = default or []
@@ -329,14 +378,16 @@ class ForeignKey(object):
                  target_type,
                  name=None,
                  attname=None,
-                 indexed=True,
+                 db_index=True,
                  required=False,
                  related_name=None,
                  default=None,
-                 validator=None):
+                 validator=None,
+                 blank=False,
+                 null=False):
         self._target_type = target_type
         self.name = name
-        self.indexed = indexed
+        self.db_index = db_index
         self.required = required
         self._attname = attname
         self._related_name = related_name
