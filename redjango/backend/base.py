@@ -1,10 +1,13 @@
 # coding: utf-8
+import sys
+
+from django import VERSION
+from django.db import utils
 from django.db.backends.dummy.base import *
 from django.db.backends.signals import connection_created
 from redis.exceptions import *
-import sys
-from django.db import utils
 from redis.client import list_or_args
+
 from client import DatabaseClient as RedisDatabaseClient
 
 try:
@@ -12,12 +15,16 @@ try:
 except ImportError, e:
     Redis = None
     from django.core.exceptions import ImproperlyConfigured
+
     raise ImproperlyConfigured("Error loading redis module: %s" % e)
 
 def complain(*args, **kwargs):
     import traceback
+
     traceback.print_stack()
-    raise ImproperlyConfigured("You haven't set the database ENGINE setting yet.")
+    raise ImproperlyConfigured(
+        "You haven't set the database ENGINE setting yet.")
+
 
 class CursorWrapper(object):
     def __init__(self, cursor):
@@ -28,7 +35,7 @@ class CursorWrapper(object):
             args = list_or_args(command, params)
             return self.cursor.execute_command(*args)
         except RedisError as e:
-            raise utils.DatabaseError, utils.DatabaseError(*tuple(e)), sys.exc_info()[2]
+            raise  utils.DatabaseError(*tuple(e))
 
     def executemany(self, commands):
         pipeline = None
@@ -49,7 +56,7 @@ class CursorWrapper(object):
                 except RedisError as re:
                     pass
             pool.release(connection)
-            raise utils.DatabaseError, utils.DatabaseError(*tuple(e)), sys.exc_info()[2]
+            raise utils.DatabaseError(*tuple(e))
         finally:
             if pipeline:
                 pipeline.reset()
@@ -61,10 +68,11 @@ class CursorWrapper(object):
         else:
             return getattr(self.cursor, attr)
 
+
 class RedisDatabaseCreation(BaseDatabaseCreation):
     def create_test_db(self, verbosity=1, autoclobber=False):
         pass
-    
+
     def destroy_test_db(self, old_database_name, verbosity=1):
         self.connection.flushdb()
 
@@ -97,9 +105,12 @@ class DatabaseWrapper(BaseDatabaseWrapper):
 
     def __init__(self, *args, **kwargs):
         super(DatabaseWrapper, self).__init__(*args, **kwargs)
-
         self.features = BaseDatabaseFeatures(self)
-        self.ops = RedisDatabaseOperations()
+        self.allow_thread_sharing = True
+        if VERSION >= (1, 4, 0, '', 0):
+            self.ops = RedisDatabaseOperations(self)
+        else:
+            self.ops = RedisDatabaseOperations()
         self.client = RedisDatabaseClient(self)
         self.creation = RedisDatabaseCreation(self)
         self.introspection = DatabaseIntrospection(self)
@@ -128,7 +139,7 @@ class DatabaseWrapper(BaseDatabaseWrapper):
                 kwargs['host'] = settings_dict['HOST']
             if settings_dict['PORT']:
                 kwargs['port'] = int(settings_dict['PORT'])
-            # We need the number of potentially affected rows after an
+                # We need the number of potentially affected rows after an
             # "UPDATE", not the number of changed rows.
             kwargs.update(settings_dict['OPTIONS'])
             self.connection = Redis(**kwargs)
