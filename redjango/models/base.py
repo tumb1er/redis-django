@@ -4,7 +4,7 @@ import time
 from datetime import datetime, date
 from django.core import exceptions
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
-from django.db import router, connections
+from django.db import router, connections, IntegrityError
 from django.db.models.base import ModelState
 from redjango.containers import Set, List
 from fields import *
@@ -299,7 +299,7 @@ class Model(object):
     def save(self, force_insert=False, force_update=False, using=None):
         """Saves the instance to the datastore."""
         if not self.is_valid():
-            raise exceptions.ValidationError(self._errors)
+            raise IntegrityError(self._errors)
         _new = self.is_new()
         if _new:
             self._initialize_id()

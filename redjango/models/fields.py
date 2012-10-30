@@ -196,7 +196,7 @@ class BooleanField(Field):
         return bool
 
     def acceptable_types(self):
-        return self.value_type()
+        return bool, int, str
 
 
 class IntegerField(Field):
@@ -246,7 +246,7 @@ class DateTimeField(Field):
     def typecast_for_read(self, value):
         try:
             return datetime.fromtimestamp(float(value))
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             return None
 
     def typecast_for_storage(self, value):
