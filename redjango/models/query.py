@@ -29,9 +29,11 @@ class QuerySet(Set):
 
     def __getitem__(self, index):
         if isinstance(index, slice):
-            #noinspection PyTypeChecker
+            index = slice(int(index.start or 0), int(index.stop or 0), int(index.step or 1))
+            set = self._set
+
             return map(lambda id: self._get_item_with_id(id),
-                self._set.__getitem__(index))
+                set.__getitem__(index))
         else:
             id = self._set[index]
             if id:
@@ -131,6 +133,10 @@ class QuerySet(Set):
     def all(self):
         return self._clone()
 
+    def select_related(self, *args, **kwargs):
+        return self._clone()
+
+
     def get_or_create(self, **kwargs):
         opts = {}
         for k, v in kwargs.iteritems():
@@ -177,6 +183,8 @@ class QuerySet(Set):
         indices = []
         for k, v in self._filters.iteritems():
             index = self._build_key_from_filter_item(k, v)
+            if k == 'user__id__exact':
+                k = 'user'
             if k not in self.model_class._indices:
                 raise AttributeNotIndexed(
                         "Field %s is not indexed in %s class." %

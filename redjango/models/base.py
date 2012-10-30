@@ -79,7 +79,7 @@ def _initialize_indices(model_class, name, bases, attrs):
     """Stores the list of indexed attributes."""
     model_class._indices = []
     for k, v in attrs.iteritems():
-        if isinstance(v, (Field, ListField)) and v.db_index:
+        if isinstance(v, (Field, ListField, ForeignKey)) and v.db_index:
             model_class._indices.append(k)
     if model_class._meta['indices']:
         model_class._indices.extend(model_class._meta['indices'])
